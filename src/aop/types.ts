@@ -30,7 +30,7 @@ export enum ADVICE_TYPE {
 export enum AOP_METADATA {
 	ASPECT = 'ASPECT_METADATA',
 	ADVICE = 'ADVICE_METADATA',
-	ADVICES_IN = 'ADVICES_INTERNAL_METADATA',
+	ADVICE_IN = 'ADVICE_INTERNAL_METADATA',
 }
 
 export interface AOPRenderProps<T extends Record<string, any> = any> {

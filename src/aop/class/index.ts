@@ -5,7 +5,8 @@ const getAspectAdvices = (target: any): Advice[] => Reflect.getMetadata(AOP_META
 
 const getAspects = (target: any): Set<ConstructorType> => Reflect.getMetadata(AOP_METADATA.ASPECT, target);
 
-const getInternalAdvices = (target: TClass | Function): IAdviceMetadata[] => Reflect.getMetadata(AOP_METADATA.ADVICES_IN, target) || [];
+const getInternalAdvices = (target: TClass | object['constructor']): IAdviceMetadata[] =>
+	Reflect.getMetadata(AOP_METADATA.ADVICE_IN, target) || [];
 
 class Advice {
 	constructor(public pointCut: PointCut, readonly adviceType: ADVICE_TYPE, readonly adviceAction: TFunction) {}
@@ -96,7 +97,7 @@ export class AOP {
 		}
 	};
 
-	decorateAspect = (constructor: TClass) => {
+	createAspect = (constructor: TClass) => {
 		const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(constructor) || [];
 		console.log(advicesMetadata);
 
@@ -170,8 +171,8 @@ export class AOP {
 			console.log(2);
 			const pointCutInstance = pointCut instanceof PointCut ? pointCut : null;
 
-			!Reflect.hasMetadata(AOP_METADATA.ADVICES_IN, target.constructor) &&
-				Reflect.defineMetadata(AOP_METADATA.ADVICES_IN, [], target.constructor);
+			!Reflect.hasMetadata(AOP_METADATA.ADVICE_IN, target.constructor) &&
+				Reflect.defineMetadata(AOP_METADATA.ADVICE_IN, [], target.constructor);
 
 			const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(target.constructor);
 			advicesMetadata.push({ pointCut: pointCutInstance, adviceType, methodName });
@@ -182,7 +183,7 @@ export class AOP {
 	before = (pointCut: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.BEFORE, pointCut);
 	after = (pointCut: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.AFTER, pointCut);
 
-	aspect = (constructor: TClass) => this.decorateAspect(constructor);
+	aspect = (constructor: TClass) => this.createAspect(constructor);
 
 	pointCut = (target: TFunction | TClass, methodName?: string) => new PointCut(target, methodName);
 }
