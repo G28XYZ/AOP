@@ -13,6 +13,7 @@ export interface IAdviceMetadata {
 	pointCut: ReturnType<AOP['pointCut']> | null;
 	adviceType: ADVICE_TYPE;
 	methodName: string;
+	id?: string;
 }
 
 export interface IJoinPoint {
@@ -36,3 +37,5 @@ export enum AOP_METADATA {
 export interface AOPRenderProps<T extends Record<string, any> = any> {
 	render: (props: AOPRenderProps & T) => ReactElement;
 }
+
+export type ExtensibleDecorator<T> = (constructor: ConstructorType<T>) => ConstructorType;

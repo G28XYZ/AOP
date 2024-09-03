@@ -10,6 +10,10 @@ const getInternalAdvices = (target: TClass | object['constructor']): IAdviceMeta
 
 class Advice {
 	constructor(public pointCut: PointCut, readonly adviceType: ADVICE_TYPE, readonly adviceAction: TFunction) {}
+
+	get id() {
+		return `${this.pointCut.methodName}${this.adviceType}`;
+	}
 }
 
 class JoinPoint implements IJoinPoint {
@@ -58,20 +62,27 @@ class PointCut {
 }
 
 export class Aspect {
-	constructor() {
-		const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(this.constructor) || [];
-		console.log(advicesMetadata);
+	constructor(bases?: TClass[]) {
+		this.create();
+
+		if (bases?.length) bases.forEach((base) => this.create(base));
+	}
+
+	private create(base?: TClass) {
+		const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(base || this.constructor) || [];
 
 		const advices = advicesMetadata
 			.filter(({ pointCut }) => !!pointCut)
 			.map(
 				({ pointCut, adviceType, methodName }) =>
-					new Advice(pointCut, adviceType, (Reflect.get(this, methodName) as any)?.bind(this))
+					new Advice(pointCut, adviceType, (Reflect.get(base || this, methodName) as any)?.bind(this))
 			);
 
-		Reflect.defineMetadata(AOP_METADATA.ADVICE, advices, this);
+		Reflect.defineMetadata(AOP_METADATA.ADVICE, advices, base || this);
 
-		advicesMetadata.forEach(({ pointCut }) => pointCut && AOP.registerAspect(pointCut.target, this.constructor as any));
+		advicesMetadata.forEach(
+			({ pointCut }) => pointCut && AOP.registerAspect(pointCut.target, base || (this.constructor as ConstructorType))
+		);
 	}
 }
 
@@ -88,34 +99,41 @@ export class AOP {
 		return lodash.isFunction(target) ? this.extendFunction(advices, target) : this.extendClassInstance(advices, target);
 	}
 
-	static registerAspect = (target: TFunction | TClass | undefined, aspect: TClass) => {
+	static registerAspect(target: TFunction | TClass | undefined, aspect: TClass | ConstructorType) {
 		if (target) {
 			!Reflect.hasMetadata(AOP_METADATA.ASPECT, target) && Reflect.defineMetadata(AOP_METADATA.ASPECT, new Set(), target);
 			const aspectsMetadata: Set<ConstructorType> = getAspects(target);
-			aspectsMetadata.add(aspect);
-			console.log({ aspectsMetadata });
-		}
-	};
 
-	createAspect = (constructor: TClass) => {
-		const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(constructor) || [];
-		console.log(advicesMetadata);
-
-		const decoratedAspect: ConstructorType = class extends constructor {
-			constructor(...args: unknown[]) {
-				super(...args);
-				console.log(constructor);
-				const advices = advicesMetadata
-					.filter(({ pointCut }) => !!pointCut)
-					.map(({ pointCut, adviceType, methodName }) => new Advice(pointCut, adviceType, this[methodName].bind(this)));
-				Reflect.defineMetadata(AOP_METADATA.ADVICE, advices, this);
+			if (!Array.from(aspectsMetadata).find((item) => item?.toString() === aspect?.toString())) {
+				aspectsMetadata.add(aspect);
 			}
-		};
+		}
+	}
 
-		advicesMetadata.forEach(({ pointCut }) => pointCut && AOP.registerAspect(pointCut.target, decoratedAspect));
+	createAspect<T extends ConstructorType>(aspect: T, aspects: T[] = []) {
+		const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(aspect) || [];
 
-		return decoratedAspect;
-	};
+		const decoratedAspect = (constructor: T) =>
+			class Aspect extends constructor {
+				constructor(...args: any[]) {
+					super(...args);
+					const advicesMetadata: IAdviceMetadata[] = getInternalAdvices(aspect) || [];
+
+					const advices = advicesMetadata
+						.filter(({ pointCut }) => !!pointCut)
+						.map(({ pointCut, adviceType, methodName }) => new Advice(pointCut, adviceType, this[methodName].bind(this)));
+
+					Reflect.defineMetadata(AOP_METADATA.ADVICE, advices, this);
+				}
+			};
+
+		// TODO - расширить передаваемые классы который попадают через декоратор aspect
+		aspects.forEach((aspect) => decoratedAspect(aspect));
+
+		advicesMetadata.forEach(({ pointCut }) => pointCut && AOP.registerAspect(pointCut.target, decoratedAspect(aspect)));
+
+		return decoratedAspect(aspect);
+	}
 
 	extendFunction(advices: Advice[], targetFn: TFunction, context?: any) {
 		Object.keys(ADVICE_TYPE).forEach((advice) => {
@@ -168,7 +186,6 @@ export class AOP {
 
 	createAdviceDecorator = (adviceType: ADVICE_TYPE, pointCut: PointCut | string): AdviceDecorator => {
 		return (target: TFunction | TClass, methodName: string) => {
-			console.log(2);
 			const pointCutInstance = pointCut instanceof PointCut ? pointCut : null;
 
 			!Reflect.hasMetadata(AOP_METADATA.ADVICE_IN, target.constructor) &&
@@ -179,11 +196,44 @@ export class AOP {
 		};
 	};
 
-	around = (pointCut: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.AROUND, pointCut);
-	before = (pointCut: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.BEFORE, pointCut);
-	after = (pointCut: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.AFTER, pointCut);
+	around = (pointCut?: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.AROUND, pointCut);
+	before = (pointCut?: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.BEFORE, pointCut);
+	after = (pointCut?: PointCut) => this.createAdviceDecorator(ADVICE_TYPE.AFTER, pointCut);
 
-	aspect = (constructor: TClass) => this.createAspect(constructor);
+	// aspect(constructor: TClass): ConstructorType;
+	// aspect(instances: TClass[]): (constructor: TClass) => ConstructorType;
+	aspect = <T extends ConstructorType>(value: T | T[]) => {
+		if (typeof value === 'function') return this.createAspect<T>(value);
+
+		// TODO - расширить передаваемые классы который попадают через декоратор aspect
+		const decorator = <any>((constructor: T) => this.createAspect(constructor, value));
+
+		if (value instanceof Array) return decorator;
+	};
 
 	pointCut = (target: TFunction | TClass, methodName?: string) => new PointCut(target, methodName);
+
+	extensible = <T extends ConstructorType>() => {
+		const instance = this;
+		return (constructor: T) => {
+			return class Extensible extends constructor {
+				constructor(...args: any[]) {
+					super(...args);
+					const aspects = getAspects(this.constructor);
+					console.log(aspects);
+					if (!lodash.isEmpty(aspects)) {
+						const advices: Advice[] = [];
+						aspects.forEach((aspect) => {
+							// console.log(aspect);
+							const aspectInstance = new aspect();
+							console.log(getAspectAdvices(aspectInstance));
+							aspectInstance && advices.push(...getAspectAdvices(aspectInstance));
+						});
+
+						instance.main(advices, this);
+					}
+				}
+			};
+		};
+	};
 }
